@@ -1,3 +1,5 @@
 python-dotenv==1.2.4
 requests==2.34.2
 zhipuai==2.1.5.20250825
+# The SDK imports sniffio without declaring it; recent anyio no longer brings it transitively.
+sniffio==1.3.1
