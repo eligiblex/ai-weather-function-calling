@@ -3,16 +3,47 @@
 from __future__ import annotations
 
 import json
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 
 DEFAULT_CITY_CODES = Path(__file__).with_name("city_codes.json")
 DEFAULT_WEATHER_API = "http://t.weather.itboy.net/api/weather/city/{city_code}"
+BEIJING_TIMEZONE = timezone(timedelta(hours=8))
 
 
 class WeatherLookupError(RuntimeError):
     """Raised when a city cannot be resolved or the weather service fails."""
+
+
+class ForecastDateError(WeatherLookupError):
+    """The provider has no verifiable forecast for the requested Beijing date."""
+
+
+def beijing_today(now: datetime | None = None) -> date:
+    """Use UTC+8 regardless of the machine's timezone; allow deterministic tests."""
+    instant = now if now is not None else datetime.now(timezone.utc)
+    if instant.tzinfo is None or instant.utcoffset() is None:
+        raise ValueError('now 必须包含时区信息')
+    return instant.astimezone(BEIJING_TIMEZONE).date()
+
+
+def select_forecast(forecasts: list, target_date: date) -> dict:
+    """Find the exact date, never silently fall back to yesterday or tomorrow."""
+    for item in forecasts:
+        if not isinstance(item, dict):
+            continue
+        try:
+            forecast_date = date.fromisoformat(item.get('ymd', ''))
+        except (TypeError, ValueError):
+            continue
+        if forecast_date == target_date and all(item.get(field) for field in ('high', 'low', 'type')):
+            return item
+    raise ForecastDateError(
+        f'天气接口暂未提供北京时间 {target_date.isoformat()} 的完整有效预报，'
+        '无法确认今天天气，请稍后重试；不能用其他日期的预报代替。'
+    )
 
 
 def load_city_codes(path: Path = DEFAULT_CITY_CODES) -> dict[str, str]:
@@ -50,13 +81,17 @@ def get_current_weather(
         payload = response.json()
         if not isinstance(payload, dict) or payload.get('status', 200) != 200:
             raise ValueError('天气接口返回错误状态')
-        forecast = payload["data"]["forecast"][0]
-        if not isinstance(forecast, dict) or not all(forecast.get(k) for k in ('high','low','type')):
+        forecasts = payload["data"]["forecast"]
+        if not isinstance(forecasts, list):
             raise ValueError('天气接口数据不完整')
     except (KeyError, IndexError, ValueError, OSError) as exc:
         raise WeatherLookupError("天气服务暂时不可用，请稍后再试") from exc
     except Exception as exc:
         raise WeatherLookupError("天气服务暂时不可用，请稍后再试") from exc
+
+    # Evaluate the date after the HTTP response, including requests crossing midnight.
+    target_date = beijing_today()
+    forecast = select_forecast(forecasts, target_date)
 
     weather = {
         "location": location,
@@ -64,8 +99,11 @@ def get_current_weather(
         "low_temperature": forecast.get("low"),
         "week": forecast.get("week"),
         "weather_type": forecast.get("type"),
-        "forecast_date": forecast.get('ymd'),
+        "forecast_date": target_date.isoformat(),
+        "query_date": target_date.isoformat(),
+        "timezone": "UTC+08:00",
         "data_time": payload.get('time'),
+        "data_note": "这是当天预报，不是即时实测；data_time 是接口更新时间，不是预报适用日期。",
         "source": "t.weather.itboy.net",
     }
     return json.dumps(weather, ensure_ascii=False)
@@ -76,7 +114,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_current_weather",
-            "description": "获取给定城市或区县的当前天气",
+            "description": "获取给定城市或区县北京时间当天的天气预报；不支持查询其他日期，缺少当天数据时返回错误",
             "parameters": {
                 "type": "object",
                 "properties": {

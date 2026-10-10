@@ -1,6 +1,7 @@
 import json
+from datetime import date
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from weather_tool import WeatherLookupError, get_current_weather, load_city_codes
 
@@ -20,14 +21,15 @@ class WeatherToolTests(unittest.TestCase):
         response.json.return_value = {
             "data": {
                 "forecast": [
-                    {"high": "高温 22℃", "low": "低温 12℃", "week": "星期五", "type": "晴"}
+                    {"high": "高温 22℃", "low": "低温 12℃", "week": "星期五", "type": "晴", "ymd": "2026-10-10"}
                 ]
             }
         }
         session = Mock()
         session.get.return_value = response
 
-        result = json.loads(get_current_weather("北京", session=session))
+        with patch('weather_tool.beijing_today', return_value=date(2026, 10, 10)):
+            result = json.loads(get_current_weather("北京", session=session))
         self.assertEqual(result["weather_type"], "晴")
         session.get.assert_called_once()
 

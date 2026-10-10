@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from unittest.mock import Mock
 import pytest
 import requests
@@ -29,7 +30,8 @@ def test_timeout_is_friendly():
     assert session.get.call_args.kwargs['timeout'] == 8.0
 
 
-def test_suffix_and_provenance():
+def test_suffix_and_provenance(monkeypatch):
+    monkeypatch.setattr('weather_tool.beijing_today', lambda: date(2026, 10, 10))
     session = Mock()
     session.get.return_value.json.return_value = {'status': 200, 'time': '2026-10-10 10:00', 'data': {'forecast': [{'high': '22', 'low': '12', 'type': '晴', 'ymd': '2026-10-10'}]}}
     result = json.loads(get_current_weather(' 北京市 ', session=session))
